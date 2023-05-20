@@ -3,6 +3,7 @@ use std::env;
 mod progress;
 mod iteration;
 mod utils;
+mod utils_v2;
 mod gemm_sampler;
 mod gemm_sampler_rayon;
 mod gemm_sampler_spawn;

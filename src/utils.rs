@@ -85,22 +85,22 @@ pub(crate) fn pluss_aet() {
     }
 }
 
-pub(crate) fn pluss_cri_share_histogram_update(tid: i32, share_ratio: i32, reuse: i64, count: f64) {
+pub(crate) fn pluss_cri_share_histogram_update(tid: i32, share_ratio: i32, reuse: i64, cnt: f64) {
     let share_ratio = share_ratio as i64;
     let mut local_share_pri = _SharePRI.lock().unwrap();
     if local_share_pri[tid as usize].contains_key(&share_ratio) {
         let mut histogram = local_share_pri[tid as usize].get(&share_ratio).unwrap().clone();
-        _pluss_histogram_update(&mut histogram, reuse, count, Some(false));
+        _pluss_histogram_update(&mut histogram, reuse, cnt, Some(false));
         local_share_pri[tid as usize].insert(share_ratio, histogram);
     } else {
         let mut histogram = HashMap::new();
-        histogram.insert(reuse, count);
+        histogram.insert(reuse, cnt);
         local_share_pri[tid as usize].insert(share_ratio, histogram);
     }
 }
 
 pub(crate) fn pluss_cri_noshare_histogram_update(tid: usize, reuse: i64, cnt: f64, in_log_format: Option<bool>) {
-    let in_log_format = in_log_format.unwrap_or(true);
+    let in_log_format = in_log_format.unwrap_or(false);
     let mut local_reuse = reuse;
     let mut histogram = _NoSharePRI.lock().unwrap();
     if local_reuse > 0 && in_log_format {

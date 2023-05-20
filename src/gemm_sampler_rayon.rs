@@ -17,8 +17,9 @@ use crate::chunk::Chunk;
 use crate::chunk_dispatcher::chunk_dispatcher;
 use crate::iteration::Iteration;
 use crate::progress::{Progress, self};
-use crate::{utils};
+use crate::{utils, utils_v2};
 // use tracing::{debug, error, info, instrument, span, trace, warn, Level, dispatcher};
+use std::sync::atomic::{AtomicI64, Ordering};
 
 /*
  * -DTHREAD_NUM=$(TNUM) -DCHUNK_SIZE=4 -DDS=8 -DCLS=64
@@ -30,7 +31,7 @@ const CHUNK_SIZE: usize = 4;
 const DS: usize = 8;
 const CLS: usize = 64;
 
-static mut max_iteration_count: i64 = 0;
+static max_iteration_count: AtomicI64 = AtomicI64::new(0);
 
 fn get_addr(idx0: i64, idx1: i64) -> u64 {
     ///don't know if to change the input para to i64, i32 or usize
@@ -67,12 +68,7 @@ fn sampler() {
     let mut tid_to_run: i32 = 0;
     let mut start_tid: i32 = 0;
     let mut working_threads: i32 = THREAD_NUM as i32;
-    let mut addr: Arc<Mutex<u64>> = Arc::new(Mutex::new(0));
     let mut loop_cnt: u64 = 0;
-    let mut count: Arc<Mutex<[i64; THREAD_NUM + 1]>> = Default::default(); //should be init as the C++ version does: {0}
-    let mut LAT_A: Arc<Mutex<[HashMap<u64, i64>; THREAD_NUM]>> = Default::default();
-    let mut LAT_B: Arc<Mutex<[HashMap<u64, i64>; THREAD_NUM]>> = Default::default();
-    let mut LAT_C: Arc<Mutex<[HashMap<u64, i64>; THREAD_NUM]>> = Default::default();
     //srand(time(NULL)); in c++, but seems like not used in the code
 
     //Generate parallel code for (c0,0,\<,128,(c0 + 1))
@@ -106,16 +102,11 @@ fn sampler() {
                 &mut idle_threads,
                 tid,
                 &mut dispatcher,
-                &mut current_progress
+                &mut current_progress,
             );
         }
     );
     idle_threads.lock().unwrap().fill(0);
-
-    //update and clear the lists
-    update_and_clear_array(&mut LAT_C);
-    update_and_clear_array(&mut LAT_A);
-    update_and_clear_array(&mut LAT_B);
 
     //delete the progress array
     for i in 0..progress.len() {
@@ -124,19 +115,14 @@ fn sampler() {
             *progress_i = None;
         }
     }
-
-    unsafe {
-        max_iteration_count = count.lock().unwrap().par_iter().sum();
-        // println!("count: {:?}", count);
-        // println!("max iteration traversed: {}", max_iteration_count);
-    }
 }
 
 fn rayon_sampler(
     idle_threads: &mut Arc<Mutex<[i32; THREAD_NUM]>>,
     tid: usize,
     dispatcher: &mut Arc<Mutex<chunk_dispatcher>>,
-    current_progress: &mut Arc<Mutex<Option<Progress>>>) {
+    current_progress: &mut Arc<Mutex<Option<Progress>>>
+) {
     let mut idle_threads = idle_threads.lock().unwrap();
     let mut dispatcher = dispatcher.lock().unwrap();
     let mut current_progress = current_progress.lock().unwrap();
@@ -261,7 +247,7 @@ fn rayon_sampler(
                         tid as i32,
                         (THREAD_NUM - 1) as i32,
                         reuse,
-                        1 as f64,
+                        1 as f64
                     );
                 } else {
                     // pluss_cri_noshare_histogram_update(tid_to_run,reuse,1);
@@ -339,19 +325,29 @@ fn rayon_sampler(
         } /* end of break condition check */
     }
     /* end of while(true) */
+    //update and clear the lists
+    utils::pluss_cri_noshare_histogram_update(tid, -1, LAT_C.len() as f64, None);
+    LAT_C.clear();
+    utils::pluss_cri_noshare_histogram_update(tid, -1, LAT_A.len() as f64, None);
+    LAT_A.clear();
+    utils::pluss_cri_noshare_histogram_update(tid, -1, LAT_B.len() as f64, None);
+    LAT_B.clear();
+
+    max_iteration_count.fetch_add(count, Ordering::SeqCst);
+    
 }
 
 pub(crate) fn acc() {
     let start = Instant::now();
     sampler();
-    utils::pluss_cri_distribute(THREAD_NUM as i32);
+    // utils::pluss_cri_distribute(THREAD_NUM as i32);
     let end = start.elapsed();
     println!("RUST RAYON: {:?}", end);
     utils::pluss_cri_noshare_print_histogram();
     utils::pluss_cri_share_print_histogram();
     utils::pluss_print_histogram();
     unsafe {
-        println!("max iteration traversed: {}", max_iteration_count);
+        println!("max iteration traversed: {:?}", max_iteration_count);
     }
 }
 
